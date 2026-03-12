@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中⽂⼝播⽂本转英⽂翻译和播放工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        /* 自定义滚动条美化 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        /* 渐变文本工具类 */
+        .text-gradient { background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen p-4 md:p-8">
+    <div id="app" class="max-w-6xl mx-auto relative">
+        
+        <transition name="fade">
+            <div v-if="toast.show" :class="`fixed top-6 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-lg text-sm font-medium flex items-center gap-2 transition-all duration-300 ${toast.type === 'error' ? 'bg-red-500 text-white' : 'bg-emerald-500 text-white'}`">
+                <i :class="toast.type === 'error' ? 'ph-bold ph-warning-circle' : 'ph-bold ph-check-circle'"></i>
+                {{ toast.message }}
+            </div>
+        </transition>
+
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <div class="flex items-center gap-3 mb-4 md:mb-0">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-indigo-200 shadow-lg">
+                    <i class="ph-fill ph-microphone-stage text-2xl text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 text-gradient">口播配音助手</h1>
+                    <p class="text-xs text-slate-400 mt-1">中文一键转英文配音 · 专为短视频/直播投放提效</p>
+                </div>
+            </div>
+            
+            <div class="bg-slate-50 px-5 py-3 rounded-xl border border-slate-200 flex items-center gap-3">
+                <i class="ph-fill ph-coins text-amber-500 text-xl"></i>
+                <div>
+                    <p class="text-xs text-slate-500">ElevenLabs 额度</p>
+                    <p v-if="quota" class="font-bold text-sm" :class="{'text-red-500': quota.remaining < 5000, 'text-emerald-600': quota.remaining >= 5000}">
+                        {{ quota.remaining }} / {{ quota.character_limit }}
+                    </p>
+                    <p v-else class="text-xs text-slate-400">正在连接查询...</p>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div class="lg:col-span-7 flex flex-col gap-6">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-bold flex items-center gap-2 mb-5 text-slate-700">
+                        <i class="ph-bold ph-faders text-indigo-500"></i> 参数配置
+                    </h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-2">选择发音人 (Voice)</label>
+                            <div class="relative">
+                                <select v-model="selectedVoice" class="w-full border border-slate-200 rounded-xl p-3 appearance-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-slate-50 hover:bg-white text-sm">
+                                    <option disabled value="">请选择你的发言人</option>
+                                    <option v-for="voice in voices" :value="voice.voice_id" :key="voice.voice_id">
+                                        {{ voice.name }}
+                                    </option>
+                                </select>
+                                <i class="ph-bold ph-caret-down absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none"></i>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-2">翻译语感风格</label>
+                            <div class="relative">
+                                <select v-model="translationStyle" class="w-full border border-slate-200 rounded-xl p-3 appearance-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-slate-50 hover:bg-white text-sm">
+                                    <option value="tiktok">🔥 口播风</option>
+                                    <option value="professional">👔 专业风</option>
+                                </select>
+                                <i class="ph-bold ph-caret-down absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex-1">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold flex items-center gap-2 text-slate-700">
+                            <i class="ph-bold ph-keyboard text-indigo-500"></i> 中文原稿
+                        </h2>
+                        <span class="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">支持空行分隔多条批量处理</span>
+                    </div>
+                    
+                    <textarea v-model="chineseInput" rows="6" class="w-full border border-slate-200 rounded-xl p-4 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-slate-50 hover:bg-white text-sm resize-y mb-5" placeholder="在此粘贴你的中文爆款文案...&#10;回车空一行可自动识别为下一条独立视频的配音。"></textarea>
+
+                    <div class="flex gap-4">
+                        <button @click="translateTexts" :disabled="isTranslating || isGenerating" class="flex-1 bg-indigo-50 text-indigo-600 border border-indigo-100 font-semibold py-3 px-4 rounded-xl hover:bg-indigo-100 hover:border-indigo-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                            <i :class="isTranslating ? 'ph-bold ph-spinner animate-spin' : 'ph-bold ph-translate'"></i>
+                            {{ isTranslating ? '智能翻译中...' : '翻译' }}
+                        </button>
+                        <button @click="generateAudio" :disabled="isGenerating || isTranslating || translatedItems.length === 0 || !selectedVoice" class="flex-1 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold py-3 px-4 rounded-xl hover:shadow-lg hover:shadow-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                            <i :class="isGenerating ? 'ph-bold ph-spinner animate-spin' : 'ph-bold ph-play-circle'"></i>
+                            {{ isGenerating ? '语音生成中...' : '语音生成' }}
+                        </button>
+                    </div>
+
+                    <div v-if="translatedItems.length > 0" class="mt-8 pt-6 border-t border-slate-100 animate-fade-in-up">
+                        <h3 class="font-bold mb-4 flex items-center gap-2 text-slate-700">
+                            <i class="ph-bold ph-pencil-simple text-purple-500"></i> 翻译结果核对 (可手动修改)
+                        </h3>
+                        <div class="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+                            <div v-for="(item, index) in translatedItems" :key="index" class="bg-slate-50 p-4 rounded-xl border border-slate-200 group focus-within:ring-2 focus-within:ring-purple-400 transition-all">
+                                <p class="text-xs font-medium text-slate-500 mb-2 border-l-2 border-slate-300 pl-2">{{ item.cn_text }}</p>
+                                <textarea v-model="item.en_text" rows="2" class="w-full bg-white border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:border-purple-400 text-slate-700"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-5 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full max-h-[850px]">
+                <div class="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
+                    <h2 class="text-lg font-bold flex items-center gap-2 text-slate-700">
+                        <i class="ph-bold ph-clock-counter-clockwise text-indigo-500"></i> 历史记录
+                    </h2>
+                    <button @click="loadHistory" class="text-slate-400 hover:text-indigo-500 p-2 rounded-lg hover:bg-slate-50 transition-all" title="刷新记录">
+                        <i class="ph-bold ph-arrows-clockwise text-lg"></i>
+                    </button>
+                </div>
+                
+                <div class="overflow-y-auto flex-1 pr-2 space-y-5">
+                    
+                    <div v-if="history.length === 0" class="flex flex-col items-center justify-center h-48 text-slate-400">
+                        <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-3">
+                            <i class="ph-fill ph-folder-open text-3xl text-slate-300"></i>
+                        </div>
+                        <p class="text-sm">尚未生成任何音频，快去试试吧！</p>
+                    </div>
+                    
+                    <div v-for="record in history" :key="record.id" class="group bg-white border border-slate-200 p-5 rounded-2xl hover:shadow-md transition-all hover:border-indigo-100 relative overflow-hidden">
+                        <div class="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-400 to-purple-500 opacity-0 group-hover:opacity-100 transition-all"></div>
+                        
+                        <p class="text-sm font-bold mb-3 text-slate-800 line-clamp-2" :title="record.cn_text">{{ record.cn_text }}</p>
+                        
+                        <div class="bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4 relative">
+                            <p class="text-sm text-slate-600 font-serif italic pr-8 line-clamp-3">{{ record.en_text }}</p>
+                            <button @click="copyText(record.en_text)" class="absolute top-2 right-2 text-slate-400 hover:text-indigo-600 bg-white p-1.5 rounded-lg shadow-sm border border-slate-100 transition-all" title="复制英文">
+                                <i class="ph-bold ph-copy"></i>
+                            </button>
+                        </div>
+                        
+                        <div class="flex flex-col gap-3">
+                            <audio :src="'http://127.0.0.1:8000' + record.audio_url" controls class="w-full h-9 outline-none"></audio>
+                            
+                            <div class="flex justify-between items-center mt-2">
+                                <span class="text-xs text-slate-400 flex items-center gap-1">
+                                    <i class="ph-fill ph-calendar-blank"></i> {{ record.created_at.substring(5, 16) }}
+                                </span>
+                                <a :href="'http://127.0.0.1:8000/api/download?file_url=' + record.audio_url" class="text-xs bg-indigo-50 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg hover:bg-indigo-500 hover:text-white transition-all font-medium flex items-center gap-1">
+                                    <i class="ph-bold ph-download-simple"></i> 下载 MP3
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+        const API_BASE = 'http://127.0.0.1:8000/api';
+
+        createApp({
+            setup() {
+                // UI 状态
+                const toast = ref({ show: false, message: '', type: 'success' });
+                
+                // 业务数据
+                const quota = ref(null);
+                const voices = ref([]);
+                const selectedVoice = ref("");
+                const translationStyle = ref("tiktok");
+                const chineseInput = ref("");
+                const translatedItems = ref([]);
+                const history = ref([]);
+                const isTranslating = ref(false);
+                const isGenerating = ref(false);
+
+                // 全局 Toast 提示方法
+                const showToast = (msg, type = 'success') => {
+                    toast.value = { show: true, message: msg, type };
+                    setTimeout(() => { toast.value.show = false; }, 3000);
+                };
+
+                const loadQuota = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/quota`);
+                        quota.value = await res.json();
+                    } catch (e) { console.error("获取额度失败"); }
+                };
+
+                const loadVoices = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/voices`);
+                        const data = await res.json();
+                        voices.value = data.voices;
+                    } catch (e) { console.error("获取音色失败"); }
+                };
+
+                const loadHistory = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/history`);
+                        const data = await res.json();
+                        history.value = data.data;
+                    } catch (e) { console.error("获取历史失败"); }
+                };
+
+                const translateTexts = async () => {
+                    if (!chineseInput.value.trim()) return showToast("请输入中文文案", 'error');
+                    const texts = chineseInput.value.split(/\n\s*\n/).filter(t => t.trim() !== '');
+                    isTranslating.value = true;
+                    try {
+                        const res = await fetch(`${API_BASE}/translate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ texts, style: translationStyle.value })
+                        });
+                        const data = await res.json();
+                        if(data.status === 'success') {
+                            translatedItems.value = data.data;
+                            showToast("翻译完成，请核对");
+                        }
+                    } catch (e) { showToast("翻译请求失败，请检查后端", 'error'); }
+                    isTranslating.value = false;
+                };
+
+                const generateAudio = async () => {
+                    if (!selectedVoice.value) return showToast("请先在上方选择发音人", 'error');
+                    isGenerating.value = true;
+                    const items = translatedItems.value.map(item => ({
+                        cn_text: item.cn_text,
+                        en_text: item.en_text,
+                        voice_id: selectedVoice.value
+                    }));
+
+                    try {
+                        const res = await fetch(`${API_BASE}/generate_audio`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ items })
+                        });
+                        const data = await res.json();
+                        
+                        if(data.status === 'success') {
+                            const errors = data.data.filter(i => i.status === 'error');
+                            if (errors.length > 0) {
+                                showToast("音频生成失败: " + errors[0].detail, 'error');
+                            } else {
+                                showToast("语音生成成功，已保存至历史记录");
+                                translatedItems.value = [];
+                                loadQuota();
+                                loadHistory();
+                            }
+                        }
+                    } catch (e) { showToast("语音生成请求失败", 'error'); }
+                    isGenerating.value = false;
+                };
+
+                const copyText = (text) => {
+                    navigator.clipboard.writeText(text).then(() => {
+                        showToast('复制成功');
+                    }).catch(err => {
+                        showToast('复制失败，请手动选择', 'error');
+                    });
+                };
+
+                onMounted(() => {
+                    loadQuota();
+                    loadVoices();
+                    loadHistory();
+                });
+
+                return {
+                    toast, quota, voices, selectedVoice, translationStyle, chineseInput,
+                    translatedItems, history, isTranslating, isGenerating,
+                    loadHistory, translateTexts, generateAudio, copyText
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
